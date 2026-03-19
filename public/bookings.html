@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My Bookings — ParkHub</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Mono:wght@400;500&family=Syne:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <nav>
+    <div class="nav-inner">
+      <div style="display:flex;align-items:center;gap:24px">
+        <a href="slots.html" class="nav-brand">
+          <span class="nav-brand-icon">◆</span>
+          ParkHub
+        </a>
+        <div class="nav-links">
+          <a href="slots.html">Slots</a>
+          <a href="bookings.html" class="active">My Bookings</a>
+          <a href="admin.html" id="admin-link" style="display:none">Admin</a>
+        </div>
+      </div>
+      <div class="nav-right">
+        <button type="button" class="btn-icon btn" id="theme-btn" title="Toggle theme">🌙</button>
+        <div class="nav-user-chip">
+          <div class="nav-avatar" id="nav-avatar">?</div>
+          <span class="nav-username" id="nav-user"></span>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="logout-btn">Sign out</button>
+      </div>
+    </div>
+  </nav>
+
+  <div class="page-md">
+    <div class="flex items-center justify-between flex-wrap gap-3 mb-8">
+      <div class="page-header" style="margin-bottom:0">
+        <h1>My Bookings</h1>
+        <p id="summary">Loading your bookings...</p>
+      </div>
+      <a href="slots.html" class="btn btn-primary btn-sm">+ New Booking</a>
+    </div>
+
+    <div id="error" class="alert alert-error" style="display:none"></div>
+
+    <div id="loading" class="loading-wrap">
+      <div class="spinner"></div>
+      <p>Fetching your bookings...</p>
+    </div>
+
+    <div id="list"></div>
+  </div>
+
+  <script type="module">
+    import { requireAuth, getUser, clearAuth, bookingsAPI } from './api.js';
+    if (!requireAuth()) throw new Error();
+
+    const user = getUser();
+    document.getElementById('nav-user').textContent = user.username;
+    document.getElementById('nav-avatar').textContent = user.username[0].toUpperCase();
+    if (user.role === 'admin') document.getElementById('admin-link').style.display = '';
+    document.getElementById('logout-btn').onclick = () => { clearAuth(); window.location.href = 'login.html'; };
+
+    // Theme
+    const saved = localStorage.getItem('theme') || 'dark';
+    document.documentElement.dataset.theme = saved;
+    const themeBtn = document.getElementById('theme-btn');
+    if (themeBtn) {
+      themeBtn.textContent = saved === 'dark' ? '☀️' : '🌙';
+      themeBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const current = document.documentElement.dataset.theme;
+        const next = current === 'dark' ? 'light' : 'dark';
+        document.documentElement.dataset.theme = next;
+        localStorage.setItem('theme', next);
+        themeBtn.textContent = next === 'dark' ? '☀️' : '🌙';
+      });
+    }
+
+    const fmt = (d) => new Date(d.endsWith('Z') ? d : d + 'Z').toLocaleString('en-IN', {
+      month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+
+    const statusBadge = (s) => ({
+      active: '<span class="badge badge-blue">Active</span>',
+      completed: '<span class="badge badge-green">Completed</span>',
+      cancelled: '<span class="badge badge-red">Cancelled</span>',
+    }[s] || '');
+
+    async function load() {
+      document.getElementById('loading').style.display = 'flex';
+      document.getElementById('list').innerHTML = '';
+      document.getElementById('error').style.display = 'none';
+      try {
+        const res = await bookingsAPI.getMy();
+        const bookings = res.data || [];
+        document.getElementById('loading').style.display = 'none';
+
+        const active = bookings.filter(b => b.status === 'active').length;
+        const completed = bookings.filter(b => b.status === 'completed').length;
+        document.getElementById('summary').textContent =
+          `${bookings.length} total · ${active} active · ${completed} completed`;
+
+        if (!bookings.length) {
+          document.getElementById('list').innerHTML = `
+            <div class="card">
+              <div class="empty-state">
+                <div class="empty-state-icon">🅿️</div>
+                <h3>No bookings yet</h3>
+                <p>You haven't booked any parking slots. Head over to the slots page to get started.</p>
+                <a href="slots.html" class="btn btn-primary" style="margin-top:20px;display:inline-flex">Browse Slots</a>
+              </div>
+            </div>`;
+          return;
+        }
+
+        document.getElementById('list').innerHTML = `<div class="card" style="overflow:hidden">` +
+          bookings.map(b => `
+            <div style="padding:20px 24px;${bookings.indexOf(b) > 0 ? 'border-top:1px solid var(--border)' : ''}">
+              <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-3">
+                  <div style="width:40px;height:40px;background:var(--bg3);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px">🚗</div>
+                  <div>
+                    <div style="font-size:15px;font-weight:700">Slot ${b.floor}-${String(b.slot_number).padStart(2,'0')}</div>
+                    <div class="text-sm text-muted">Floor ${b.floor} · ${b.vehicle_number}</div>
+                  </div>
+                </div>
+                ${statusBadge(b.status)}
+              </div>
+
+              <div class="booking-meta">
+                <div class="booking-meta-item">
+                  <div class="booking-meta-label">Check-in</div>
+                  <div class="booking-meta-value">${fmt(b.start_time)}</div>
+                </div>
+                <div class="booking-meta-item">
+                  <div class="booking-meta-label">Check-out</div>
+                  <div class="booking-meta-value">${b.end_time ? fmt(b.end_time) : '—'}</div>
+                </div>
+              </div>
+
+              ${b.amount ? `
+                <div class="amount-box">
+                  <span>💰 Total charged</span>
+                  <span style="font-weight:700;font-size:16px">₹${b.amount}</span>
+                </div>` : ''}
+
+              ${b.status === 'active' ? `
+                <div class="flex gap-2">
+                  <button class="btn btn-success flex-1" onclick="checkout(${b.id})">✓ Checkout & Pay</button>
+                  <button class="btn btn-danger" onclick="cancel(${b.id})" style="padding:9px 16px">Cancel</button>
+                </div>` : ''}
+            </div>
+          `).join('') + `</div>`;
+      } catch (e) {
+        document.getElementById('loading').style.display = 'none';
+        const err = document.getElementById('error');
+        err.textContent = e.message; err.style.display = 'block';
+      }
+    }
+
+    window.cancel = async (id) => {
+      if (!confirm('Cancel this booking? This cannot be undone.')) return;
+      try { await bookingsAPI.cancel(id); load(); } catch (e) { alert(e.message); }
+    };
+
+    window.checkout = async (id) => {
+      if (!confirm('Complete checkout and generate your bill?')) return;
+      try {
+        const res = await bookingsAPI.checkout(id);
+        alert(`✅ Checkout complete!\n\nDuration: ${res.data.duration_hours} hrs\nTotal bill: ₹${res.data.amount}`);
+        load();
+      } catch (e) { alert(e.message); }
+    };
+
+    load();
+  </script>
+</body>
+</html>

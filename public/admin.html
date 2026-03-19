@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Dashboard — ParkHub</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Mono:wght@400;500&family=Syne:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <nav>
+    <div class="nav-inner">
+      <div style="display:flex;align-items:center;gap:24px">
+        <a href="slots.html" class="nav-brand">
+          <span class="nav-brand-icon">◆</span>
+          ParkHub
+        </a>
+        <div class="nav-links">
+          <a href="slots.html">Slots</a>
+          <a href="bookings.html">My Bookings</a>
+          <a href="admin.html" class="active">Admin</a>
+        </div>
+      </div>
+      <div class="nav-right">
+        <button type="button" class="btn-icon btn" id="theme-btn" title="Toggle theme">🌙</button>
+        <div class="nav-user-chip">
+          <div class="nav-avatar" id="nav-avatar">?</div>
+          <span class="nav-username" id="nav-user"></span>
+        </div>
+        <span class="badge badge-amber" style="font-size:11px">Admin</span>
+        <button class="btn btn-secondary btn-sm" id="logout-btn">Sign out</button>
+      </div>
+    </div>
+  </nav>
+
+  <div class="page">
+    <div class="flex items-center justify-between flex-wrap gap-3 mb-8">
+      <div class="page-header" style="margin-bottom:0">
+        <h1>Admin Dashboard</h1>
+        <p>System overview, slot management, and booking history</p>
+      </div>
+      <button class="btn btn-secondary btn-sm" id="refresh-btn">↻ Refresh</button>
+    </div>
+
+    <div id="error" class="alert alert-error" style="display:none"></div>
+
+    <div id="loading" class="loading-wrap">
+      <div class="spinner"></div>
+      <p>Loading dashboard data...</p>
+    </div>
+
+    <div id="content" style="display:none">
+      <!-- Stats -->
+      <div class="stats-grid" id="stats"></div>
+
+      <!-- Slot Management -->
+      <div class="card mb-6">
+        <div class="section-header">
+          <div>
+            <h2>Slot Management</h2>
+            <p>Click any slot to update its status</p>
+          </div>
+          <div class="legend" style="margin:0">
+            <div class="legend-item"><span class="legend-dot" style="background:#86efac"></span>Available</div>
+            <div class="legend-item"><span class="legend-dot" style="background:var(--bg4)"></span>Booked</div>
+            <div class="legend-item"><span class="legend-dot" style="background:#fde68a"></span>Maintenance</div>
+          </div>
+        </div>
+        <div style="padding:24px">
+          <div id="slot-grid"></div>
+        </div>
+      </div>
+
+      <!-- Bookings Table -->
+      <div class="card">
+        <div class="section-header">
+          <div>
+            <h2>All Bookings</h2>
+            <p id="bookings-count">Loading...</p>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>User</th>
+                <th>Slot</th>
+                <th>Vehicle</th>
+                <th>Check-in</th>
+                <th>Check-out</th>
+                <th>Duration</th>
+                <th>Status</th>
+                <th>Amount</th>
+              </tr>
+            </thead>
+            <tbody id="bookings-table"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slot Edit Modal -->
+  <div class="modal-overlay" id="modal" style="display:none">
+    <div class="card modal">
+      <h2 style="font-size:18px;font-weight:800;letter-spacing:-.2px;margin-bottom:4px" id="modal-title">Update Slot</h2>
+      <p class="text-sm text-muted mb-6">Change the operational status of this slot</p>
+
+      <div id="modal-slot-info" style="background:var(--bg3);border-radius:10px;padding:14px 16px;margin-bottom:20px">
+        <div style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Current slot</div>
+        <div style="font-size:15px;font-weight:700" id="modal-slot-name">—</div>
+      </div>
+
+      <div class="form-group">
+        <label class="label">New Status</label>
+        <select class="input" id="new-status">
+          <option value="available">✅ Available — Open for booking</option>
+          <option value="booked">🔴 Booked — Currently occupied</option>
+          <option value="maintenance">🔧 Maintenance — Temporarily closed</option>
+        </select>
+      </div>
+      <div class="flex gap-2 mt-4">
+        <button class="btn btn-primary flex-1" id="update-btn">Update Status</button>
+        <button class="btn btn-secondary" id="cancel-modal-btn" style="padding:9px 16px">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { requireAuth, requireAdmin, getUser, clearAuth, bookingsAPI, slotsAPI } from './api.js';
+    if (!requireAuth()) throw new Error();
+    if (!requireAdmin()) throw new Error();
+
+    const user = getUser();
+    document.getElementById('nav-user').textContent = user.username;
+    document.getElementById('nav-avatar').textContent = user.username[0].toUpperCase();
+    document.getElementById('logout-btn').onclick = () => { clearAuth(); window.location.href = 'login.html'; };
+    document.getElementById('refresh-btn').onclick = load;
+
+    // Theme
+    const saved = localStorage.getItem('theme') || 'dark';
+    document.documentElement.dataset.theme = saved;
+    const themeBtn = document.getElementById('theme-btn');
+    if (themeBtn) {
+      themeBtn.textContent = saved === 'dark' ? '☀️' : '🌙';
+      themeBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const current = document.documentElement.dataset.theme;
+        const next = current === 'dark' ? 'light' : 'dark';
+        document.documentElement.dataset.theme = next;
+        localStorage.setItem('theme', next);
+        themeBtn.textContent = next === 'dark' ? '☀️' : '🌙';
+      });
+    }
+
+    const fmt = (d) => new Date(d.endsWith('Z') ? d : d + 'Z').toLocaleString('en-IN', {
+      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+
+    const duration = (start, end) => {
+      if (!end) return '—';
+      const hrs = ((new Date(end.endsWith('Z') ? end : end + 'Z') - new Date(start.endsWith('Z') ? start : start + 'Z')) / 36e5).toFixed(1);
+      return `${hrs} hr${hrs == 1 ? '' : 's'}`;
+    };
+
+    const statusBadge = (s) => ({
+      active: '<span class="badge badge-blue">Active</span>',
+      completed: '<span class="badge badge-green">Completed</span>',
+      cancelled: '<span class="badge badge-red">Cancelled</span>',
+    }[s] || '');
+
+    let selectedSlot = null;
+
+    async function load() {
+      document.getElementById('loading').style.display = 'flex';
+      document.getElementById('content').style.display = 'none';
+      document.getElementById('error').style.display = 'none';
+      try {
+        const [bRes, sRes] = await Promise.all([bookingsAPI.getAll(), slotsAPI.getAll()]);
+        const bookings = bRes.data || [];
+        const slots = sRes.data || [];
+
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('content').style.display = 'block';
+
+        const revenue = bookings.filter(b => b.status === 'completed' && b.amount).reduce((s, b) => s + b.amount, 0);
+        const activeBookings = bookings.filter(b => b.status === 'active').length;
+        const completedBookings = bookings.filter(b => b.status === 'completed').length;
+        const occupancy = slots.length ? Math.round((slots.filter(s => s.status === 'booked').length / slots.length) * 100) : 0;
+
+        document.getElementById('stats').innerHTML = [
+          { icon: '🅿️', label: 'Total Slots', value: slots.length, sub: `${slots.filter(s => s.status === 'available').length} available now` },
+          { icon: '🟢', label: 'Available', value: slots.filter(s => s.status === 'available').length, sub: `${100 - occupancy}% of capacity` },
+          { icon: '🔴', label: 'Occupied', value: slots.filter(s => s.status === 'booked').length, sub: `${occupancy}% occupancy` },
+          { icon: '📋', label: 'Active Bookings', value: activeBookings, sub: 'Currently parked' },
+          { icon: '✅', label: 'Completed', value: completedBookings, sub: 'All time' },
+          { icon: '💰', label: 'Total Revenue', value: `₹${revenue}`, sub: 'From completed bookings' },
+        ].map(({ icon, label, value, sub }) => `
+          <div class="card stat-card">
+            <div class="stat-icon">${icon}</div>
+            <div class="stat-label">${label}</div>
+            <div class="stat-value">${value}</div>
+            <div class="stat-sub">${sub}</div>
+          </div>
+        `).join('');
+
+        // Slot grid by floor
+        const floors = [...new Set(slots.map(s => s.floor))].sort();
+        const grid = document.getElementById('slot-grid');
+        grid.innerHTML = floors.map(floor => {
+          const floorSlots = slots.filter(s => s.floor === floor);
+          return `
+            <div class="floor-label" style="margin-top:${floor > floors[0] ? '20px' : '0'}">Floor ${floor}</div>
+            <div class="slot-grid" style="margin-bottom:8px">
+              ${floorSlots.map(slot => `
+                <button class="slot slot-${slot.status}" data-id="${slot.id}" data-status="${slot.status}" data-floor="${slot.floor}" data-num="${slot.slot_number}">
+                  <span>${slot.floor}-${String(slot.slot_number).padStart(2,'0')}</span>
+                  <span style="font-size:9px;opacity:.6;font-weight:500">${slot.status === 'available' ? 'FREE' : slot.status === 'booked' ? 'TAKEN' : 'MAINT'}</span>
+                </button>
+              `).join('')}
+            </div>
+          `;
+        }).join('');
+
+        grid.querySelectorAll('.slot').forEach(btn => {
+          btn.onclick = () => {
+            grid.querySelectorAll('.slot.selected').forEach(el => el.classList.remove('selected'));
+            btn.classList.add('selected');
+            selectedSlot = { id: +btn.dataset.id, floor: btn.dataset.floor, slot_number: btn.dataset.num };
+            document.getElementById('new-status').value = btn.dataset.status;
+            document.getElementById('modal-title').textContent = `Update Slot ${btn.dataset.floor}-${String(btn.dataset.num).padStart(2,'0')}`;
+            document.getElementById('modal-slot-name').textContent = `Floor ${btn.dataset.floor}, Slot ${String(btn.dataset.num).padStart(2,'0')} · Currently ${btn.dataset.status}`;
+            document.getElementById('modal').style.display = 'flex';
+          };
+        });
+
+        document.getElementById('bookings-count').textContent =
+          `${bookings.length} total · ${activeBookings} active · ${completedBookings} completed`;
+
+        document.getElementById('bookings-table').innerHTML = bookings.length
+          ? bookings.map(b => `
+            <tr>
+              <td style="color:var(--text3);font-size:13px">#${b.id}</td>
+              <td>
+                <div style="font-weight:600">${b.username}</div>
+              </td>
+              <td style="font-weight:600">Floor ${b.floor} · ${String(b.slot_number).padStart(2,'0')}</td>
+              <td class="font-mono">${b.vehicle_number}</td>
+              <td style="color:var(--text2);font-size:13px">${fmt(b.start_time)}</td>
+              <td style="color:var(--text2);font-size:13px">${b.end_time ? fmt(b.end_time) : '—'}</td>
+              <td style="color:var(--text2);font-size:13px">${duration(b.start_time, b.end_time)}</td>
+              <td>${statusBadge(b.status)}</td>
+              <td style="font-weight:700">${b.amount ? `₹${b.amount}` : '—'}</td>
+            </tr>
+          `).join('')
+          : `<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text3)">No bookings yet</td></tr>`;
+
+      } catch (e) {
+        document.getElementById('loading').style.display = 'none';
+        const err = document.getElementById('error');
+        err.textContent = e.message; err.style.display = 'block';
+      }
+    }
+
+    document.getElementById('cancel-modal-btn').onclick = () => {
+      document.getElementById('modal').style.display = 'none';
+      document.querySelectorAll('.slot.selected').forEach(el => el.classList.remove('selected'));
+    };
+
+    document.getElementById('update-btn').onclick = async () => {
+      if (!selectedSlot) return;
+      const btn = document.getElementById('update-btn');
+      btn.disabled = true; btn.textContent = 'Updating...';
+      try {
+        await slotsAPI.update(selectedSlot.id, { status: document.getElementById('new-status').value });
+        document.getElementById('modal').style.display = 'none';
+        load();
+      } catch (e) {
+        alert(e.message);
+      } finally {
+        btn.disabled = false; btn.textContent = 'Update Status';
+      }
+    };
+
+    load();
+  </script>
+</body>
+</html>

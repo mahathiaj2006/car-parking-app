@@ -1,6 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const path = require("path");
 const bcrypt = require("bcrypt");
 const db = require("./db");
 const { PORT } = require("./config/constants");
@@ -46,8 +47,8 @@ db.serialize(() => {
   // Seed slots (only if empty)
   db.all("SELECT * FROM slots", [], (err, rows) => {
     if (!rows || rows.length === 0) {
-      for (let floor = 1; floor <= 2; floor++) {
-        for (let i = 1; i <= 5; i++) {
+      for (let floor = 1; floor <= 5; floor++) {
+        for (let i = 1; i <= 20; i++) {
           db.run("INSERT INTO slots (slot_number, floor) VALUES (?, ?)", [i, floor]);
         }
       }
@@ -70,6 +71,8 @@ db.serialize(() => {
     }
   });
 });
+
+app.use(express.static(path.join(__dirname, '../public')));
 
 app.get("/api", (req, res) => res.send("API is running"));
 

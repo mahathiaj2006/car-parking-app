@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Parking Slots — ParkHub</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Mono:wght@400;500&family=Syne:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <nav>
+    <div class="nav-inner">
+      <div style="display:flex;align-items:center;gap:24px">
+        <a href="slots.html" class="nav-brand">
+          <span class="nav-brand-icon">◆</span>
+          ParkHub
+        </a>
+        <div class="nav-links">
+          <a href="slots.html" class="active">Slots</a>
+          <a href="bookings.html">My Bookings</a>
+          <a href="admin.html" id="admin-link" style="display:none">Admin</a>
+        </div>
+      </div>
+      <div class="nav-right">
+        <button type="button" class="btn-icon btn" id="theme-btn" title="Toggle theme">🌙</button>
+        <div class="nav-user-chip">
+          <div class="nav-avatar" id="nav-avatar">?</div>
+          <span class="nav-username" id="nav-user"></span>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="logout-btn">Sign out</button>
+      </div>
+    </div>
+  </nav>
+
+  <div class="page">
+    <!-- Page header -->
+    <div class="flex items-center justify-between flex-wrap gap-3 mb-8">
+      <div class="page-header" style="margin-bottom:0">
+        <h1>Parking Slots</h1>
+        <p id="slot-summary">Loading slots...</p>
+      </div>
+      <div class="legend">
+        <div class="legend-item"><span class="legend-dot" style="background:#86efac"></span>Available</div>
+        <div class="legend-item"><span class="legend-dot" style="background:var(--bg4)"></span>Booked</div>
+        <div class="legend-item"><span class="legend-dot" style="background:#fde68a"></span>Maintenance</div>
+      </div>
+    </div>
+
+    <div id="error" class="alert alert-error" style="display:none"></div>
+
+    <div id="loading" class="loading-wrap">
+      <div class="spinner"></div>
+      <p>Loading parking slots...</p>
+    </div>
+
+    <div id="floors"></div>
+  </div>
+
+  <!-- Booking Modal -->
+  <div class="modal-overlay" id="modal" style="display:none">
+    <div class="card modal">
+      <div style="margin-bottom:20px">
+        <h2 style="font-size:18px;font-weight:800;letter-spacing:-.2px;margin-bottom:4px" id="modal-title">Book Slot</h2>
+        <p class="text-sm text-muted">Enter your vehicle number to confirm the booking</p>
+      </div>
+
+      <div id="slot-info" style="background:var(--bg3);border-radius:10px;padding:14px 16px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">Selected Slot</div>
+          <div style="font-size:16px;font-weight:700" id="slot-info-name">—</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">Rate</div>
+          <div style="font-size:16px;font-weight:700">₹50 / hr</div>
+        </div>
+      </div>
+
+      <form id="book-form">
+        <div class="form-group">
+          <label class="label" for="vehicle">Vehicle Number</label>
+          <input class="input" type="text" id="vehicle" placeholder="e.g. DL-01-AB-1234" required />
+          <p class="form-hint">Enter your vehicle registration number</p>
+        </div>
+        <div class="flex gap-2 mt-4">
+          <button class="btn btn-primary flex-1" type="submit" id="book-btn">Confirm Booking</button>
+          <button class="btn btn-secondary" type="button" id="cancel-modal-btn" style="padding:9px 16px">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script type="module">
+    import { requireAuth, getUser, clearAuth, slotsAPI, bookingsAPI } from './api.js';
+    if (!requireAuth()) throw new Error();
+
+    const user = getUser();
+    document.getElementById('nav-user').textContent = user.username;
+    document.getElementById('nav-avatar').textContent = user.username[0].toUpperCase();
+    if (user.role === 'admin') document.getElementById('admin-link').style.display = '';
+    document.getElementById('logout-btn').onclick = () => { clearAuth(); window.location.href = 'login.html'; };
+
+    // Theme
+    const saved = localStorage.getItem('theme') || 'dark';
+    document.documentElement.dataset.theme = saved;
+    const themeBtn = document.getElementById('theme-btn');
+    if (themeBtn) {
+      themeBtn.textContent = saved === 'dark' ? '☀️' : '🌙';
+      themeBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const current = document.documentElement.dataset.theme;
+        const next = current === 'dark' ? 'light' : 'dark';
+        document.documentElement.dataset.theme = next;
+        localStorage.setItem('theme', next);
+        themeBtn.textContent = next === 'dark' ? '☀️' : '🌙';
+      });
+    }
+
+    let selectedSlot = null;
+
+    async function load() {
+      document.getElementById('loading').style.display = 'flex';
+      document.getElementById('floors').innerHTML = '';
+      document.getElementById('error').style.display = 'none';
+      try {
+        const res = await slotsAPI.getAll();
+        const slots = res.data || [];
+        document.getElementById('loading').style.display = 'none';
+
+        const available = slots.filter(s => s.status === 'available').length;
+        const booked = slots.filter(s => s.status === 'booked').length;
+        document.getElementById('slot-summary').textContent =
+          `${available} available · ${booked} occupied · ${slots.length} total`;
+
+        const floors = [...new Set(slots.map(s => s.floor))].sort();
+        const container = document.getElementById('floors');
+
+        floors.forEach(floor => {
+          const floorSlots = slots.filter(s => s.floor === floor);
+          const floorAvail = floorSlots.filter(s => s.status === 'available').length;
+
+          const section = document.createElement('div');
+          section.style.marginBottom = '32px';
+          section.innerHTML = `
+            <div class="floor-label">
+              Floor ${floor}
+              <span style="font-size:11px;font-weight:500;color:var(--text3);text-transform:none;letter-spacing:0">${floorAvail} of ${floorSlots.length} available</span>
+            </div>
+          `;
+          const grid = document.createElement('div');
+          grid.className = 'slot-grid';
+
+          floorSlots.forEach(slot => {
+            const btn = document.createElement('button');
+            btn.className = `slot slot-${slot.status}`;
+            btn.innerHTML = `
+              <span>${slot.floor}-${String(slot.slot_number).padStart(2,'0')}</span>
+              <span style="font-size:9px;opacity:.6;font-weight:500">${slot.status === 'available' ? 'FREE' : slot.status === 'booked' ? 'TAKEN' : 'MAINT'}</span>
+            `;
+            btn.disabled = slot.status !== 'available';
+            btn.title = slot.status === 'available' ? `Book slot ${slot.floor}-${String(slot.slot_number).padStart(2,'0')}` : `Slot ${slot.status}`;
+            btn.onclick = () => openModal(slot, btn);
+            grid.appendChild(btn);
+          });
+
+          section.appendChild(grid);
+          container.appendChild(section);
+        });
+      } catch (e) {
+        document.getElementById('loading').style.display = 'none';
+        const err = document.getElementById('error');
+        err.textContent = e.message; err.style.display = 'block';
+      }
+    }
+
+    function openModal(slot, btn) {
+      selectedSlot = slot;
+      document.querySelectorAll('.slot.selected').forEach(el => el.classList.remove('selected'));
+      btn.classList.add('selected');
+      const name = `${slot.floor}-${String(slot.slot_number).padStart(2,'0')}`;
+      document.getElementById('modal-title').textContent = `Book Slot ${name}`;
+      document.getElementById('slot-info-name').textContent = `Floor ${slot.floor}, Slot ${String(slot.slot_number).padStart(2,'0')}`;
+      document.getElementById('vehicle').value = '';
+      document.getElementById('modal').style.display = 'flex';
+    }
+
+    document.getElementById('cancel-modal-btn').onclick = () => {
+      document.getElementById('modal').style.display = 'none';
+      document.querySelectorAll('.slot.selected').forEach(el => el.classList.remove('selected'));
+    };
+
+    document.getElementById('book-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('book-btn');
+      btn.disabled = true; btn.textContent = 'Booking...';
+      try {
+        await bookingsAPI.create(selectedSlot.id, document.getElementById('vehicle').value.toUpperCase());
+        document.getElementById('modal').style.display = 'none';
+        load();
+      } catch (e) {
+        alert(e.message);
+      } finally {
+        btn.disabled = false; btn.textContent = 'Confirm Booking';
+      }
+    });
+
+    load();
+  </script>
+</body>
+</html>
