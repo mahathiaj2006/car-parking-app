@@ -560,9 +560,3 @@ Ensure backend is running and check the API_BASE_URL in `public/api.js`
 rm server/database.db
 # Restart server to regenerate schema
 ```
-
-## License
-MIT
-
-## Support
-For issues or questions, please create an issue in the repository.
